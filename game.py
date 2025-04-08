@@ -6,9 +6,12 @@ import requests
 import random
 import time
 
+# Game version
+VERSION = "1.1.0"
+
 # Initialize Pygame
 pygame.init()
-screen = pygame.display.set_mode((1680, 1050))
+screen = pygame.display.set_mode((800, 600))
 clock = pygame.time.Clock()
 font = pygame.font.Font(None, 36)
 
@@ -23,6 +26,30 @@ server_port = None  # Will be set dynamically
 lan_games = []  # List of discovered LAN games (IP, port)
 in_game_menu = False  # For in-game menu
 selected_option = 0  # For menu navigation
+message = "Checking for updates..."  # Initial message for update check
+
+# Function to check for updates
+def check_for_update():
+    global message
+    try:
+        # Fetch the latest version info from the repository
+        response = requests.get("https://raw.githubusercontent.com/PocketOtter/game-project/main/latest_version.txt")
+        response.raise_for_status()  # Raise an error for bad responses
+        lines = response.text.strip().split("\n")
+        latest_version = lines[0].strip()
+        download_url = lines[1].strip() if len(lines) > 1 else "Unknown URL"
+
+        # Compare versions (simple string comparison for now)
+        if latest_version > VERSION:
+            message = f"Update available! New version: {latest_version}\nDownload at: {download_url}"
+            return False  # Update available, don't proceed to main menu yet
+        else:
+            message = ""  # No update needed
+            return True  # Proceed to main menu
+    except Exception as e:
+        print(f"Failed to check for updates: {e}")
+        message = "Could not check for updates. Starting game..."
+        return True  # Proceed anyway if the check fails
 
 # Networking functions
 def start_server(is_lan=True):
@@ -63,9 +90,10 @@ def handle_client(client, player_id):
             break
 
 def server_thread(is_lan):
-    global server_running
+    global server_running, message
     try:
         ip, port = start_server(is_lan)
+        message = f"Share this port: {port}"  # Set the message with the port number
         if is_lan:
             # Start broadcasting for LAN discovery
             threading.Thread(target=broadcast_lan_game, args=(ip, port), daemon=True).start()
@@ -86,6 +114,7 @@ def server_thread(is_lan):
     except Exception as e:
         print(f"Server error: {e}")
         server_running = False
+        message = "Failed to start server"
         return None, None
 
 def get_local_ip():
@@ -137,14 +166,16 @@ def discover_lan_games():
     discovery_socket.close()
 
 def connect_to_server(ip, port):
-    global client_socket, local_player_id, players
+    global client_socket, local_player_id, players, message
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         client_socket.connect((ip, port))
         threading.Thread(target=receive_data, daemon=True).start()
         local_player_id = None
+        message = f"Connected to port {port}"
         return True
     except:
+        message = "Failed to connect"
         return False
 
 def receive_data():
@@ -174,9 +205,8 @@ def draw_cursor(x, y):
 
 # Menu and game loop
 running = True
-mode = "main_menu"
+mode = "update_check"  # Start in update check mode
 port_input = ""
-message = ""
 selected_option = 0
 in_game_menu_options = [
     "Exit To Main Menu (E)",
@@ -205,7 +235,14 @@ while running:
         if event.type == pygame.QUIT:
             running = False
         elif event.type == pygame.KEYDOWN:
-            if mode in ["single", "lan_host", "online_host"] and not in_game_menu:
+            if mode == "update_check":
+                if event.key == pygame.K_RETURN or event.key == pygame.K_ESCAPE:
+                    if "Update available" in message:
+                        # If an update is available, keep showing the message
+                        continue
+                    else:
+                        mode = "main_menu"  # Proceed to main menu if no update
+            elif mode in ["single", "lan_host", "online_host"] and not in_game_menu:
                 if event.key == pygame.K_ESCAPE:
                     in_game_menu = True
                     selected_option = 0
@@ -224,6 +261,7 @@ while running:
                         client_socket = None
                     players.clear()
                     players[0] = {"x": 400, "y": 300}
+                    message = ""
                 elif event.key == pygame.K_o and mode != "lan_host" and mode != "online_host":  # Open To LAN
                     selected_option = 1
                     in_game_menu = False
@@ -240,6 +278,7 @@ while running:
                 if event.key == pygame.K_s:  # Single-Player
                     selected_option = 0
                     mode = "single"
+                    message = ""
                 elif event.key == pygame.K_m:  # Multiplayer
                     selected_option = 1
                     mode = "multiplayer_menu"
@@ -280,15 +319,12 @@ while running:
                             if lan_port == port:
                                 if connect_to_server(ip, port):
                                     mode = "lan_client"
-                                    message = f"Connected to port {port}"
                                     break
                         else:
                             ip = get_public_ip()
                             if connect_to_server(ip, port):
                                 mode = "online_client"
-                                message = f"Connected to port {port}"
                             else:
-                                message = "Failed to connect"
                                 mode = "multiplayer_menu"
                 elif event.key == pygame.K_BACKSPACE:
                     port_input = port_input[:-1]
@@ -316,7 +352,20 @@ while running:
 
     # Render
     screen.fill((0, 0, 0))
-    if mode == "main_menu":
+    if mode == "update_check":
+        # Display the update check message
+        msg_text = font.render(message, True, (255, 255, 255))
+        msg_rect = msg_text.get_rect(center=(screen.get_width() // 2, screen.get_height() // 2))
+        screen.blit(msg_text, msg_rect)
+        if "Update available" in message:
+            prompt_text = font.render("Press Enter or Escape to continue", True, (255, 255, 255))
+            prompt_rect = prompt_text.get_rect(center=(screen.get_width() // 2, screen.get_height() // 2 + 40))
+            screen.blit(prompt_text, prompt_rect)
+        else:
+            # Automatically check for updates on first loop
+            if check_for_update():
+                mode = "main_menu"  # Proceed to main menu if no update
+    elif mode == "main_menu":
         for i, text in enumerate(main_menu_options):
             color = (255, 255, 255)
             render = font.render(text, True, color)
@@ -363,7 +412,7 @@ while running:
             render = font.render(text, True, (255, 255, 255))
             screen.blit(render, (100, 100 + i * 30))
         back_text = font.render("Press B or Enter to go back", True, (255, 255, 255))
-        screen.blit(back_text, (100, 620))
+        screen.blit(back_text, (100, 400))
     elif mode == "join_prompt":
         prompt = font.render("Enter port to join (e.g., 54321):", True, (255, 255, 255))
         port_text = font.render(port_input, True, (255, 255, 255))
@@ -385,9 +434,12 @@ while running:
                 if i == selected_option:
                     draw_cursor(210, y_pos)
 
-    if message and mode not in ["main_menu", "multiplayer_menu", "controls_menu"]:
-        msg_text = font.render(message, True, (255, 255, 255))
-        screen.blit(msg_text, (10, 10))
+    # Display the message in the top-right corner during gameplay
+    if mode not in ["update_check", "main_menu", "multiplayer_menu", "controls_menu", "join_prompt"]:
+        if message and "Update available" not in message:  # Show port message during gameplay
+            msg_text = font.render(message, True, (255, 255, 255))
+            msg_rect = msg_text.get_rect(topright=(screen.get_width() - 10, 10))
+            screen.blit(msg_text, msg_rect)
 
     pygame.display.flip()
     clock.tick(60)
