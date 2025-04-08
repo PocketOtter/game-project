@@ -7,7 +7,7 @@ import random
 import time
 
 # Game version
-VERSION = "1.1.2"
+VERSION = "1.1.0"
 
 # Initialize Pygame
 pygame.init()
@@ -42,10 +42,10 @@ def check_for_update():
         # Compare versions (simple string comparison for now)
         if latest_version > VERSION:
             message = f"Update available! New version: {latest_version}\nDownload at: {download_url}"
-            return False  # Update available, don't proceed to main menu yet
+            return False  # Update available
         else:
             message = ""  # No update needed
-            return True  # Proceed to main menu
+            return True  # No update
     except Exception as e:
         print(f"Failed to check for updates: {e}")
         message = "Could not check for updates. Starting game..."
@@ -241,11 +241,7 @@ while running:
         elif event.type == pygame.KEYDOWN:
             if mode == "update_check":
                 if event.key == pygame.K_RETURN or event.key == pygame.K_ESCAPE:
-                    if "Update available" in message:
-                        # If an update is available, keep showing the message
-                        continue
-                    else:
-                        mode = "main_menu"  # Proceed to main menu if no update
+                    mode = "main_menu"  # Always proceed to main menu on Enter/Escape
             elif mode in ["single", "lan_host", "online_host"] and not in_game_menu:
                 if event.key == pygame.K_ESCAPE:
                     in_game_menu = True
