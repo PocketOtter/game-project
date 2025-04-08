@@ -1,2 +1,2 @@
 1.1.0
-https://github.com/PocketOtter/game-project/releases/download/v1.1.0/game-windows.exe
+https://github.com/PocketOtter/game-project/releases/tag/v1.1.0
