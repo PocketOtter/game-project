@@ -11,7 +11,7 @@ VERSION = "1.1.0"
 
 # Initialize Pygame
 pygame.init()
-screen = pygame.display.set_mode((800, 600))
+screen = pygame.display.set_mode((1680, 1050))
 clock = pygame.time.Clock()
 font = pygame.font.Font(None, 36)
 
