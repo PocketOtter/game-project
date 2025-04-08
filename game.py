@@ -7,11 +7,11 @@ import random
 import time
 
 # Game version
-VERSION = "1.1.0"
+VERSION = "1.1.2"
 
 # Initialize Pygame
 pygame.init()
-screen = pygame.display.set_mode((1680, 1050))
+screen = pygame.display.set_mode((800, 600))
 clock = pygame.time.Clock()
 font = pygame.font.Font(None, 36)
 
@@ -170,12 +170,15 @@ def connect_to_server(ip, port):
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         client_socket.connect((ip, port))
+        client_socket.settimeout(1.0)  # Non-blocking
         threading.Thread(target=receive_data, daemon=True).start()
         local_player_id = None
         message = f"Connected to port {port}"
         return True
-    except:
-        message = "Failed to connect"
+    except Exception as e:
+        print(f"Connection failed: {e}")
+        message = f"Failed to connect to {ip}:{port}"
+        client_socket = None
         return False
 
 def receive_data():
@@ -188,7 +191,8 @@ def receive_data():
                 if local_player_id is None:
                     local_player_id = min(players.keys())
         except:
-            client_socket.close()
+            if client_socket:
+                client_socket.close()
             break
 
 # Function to draw the custom cursor
@@ -314,18 +318,29 @@ while running:
             elif mode == "join_prompt":
                 if event.key == pygame.K_RETURN:
                     if port_input:
-                        port = int(port_input)
-                        for ip, lan_port in lan_games:
-                            if lan_port == port:
+                        try:
+                            port = int(port_input)
+                            # First, try to connect to a LAN game
+                            connected = False
+                            for ip, lan_port in lan_games:
+                                if lan_port == port:
+                                    if connect_to_server(ip, port):
+                                        mode = "lan_client"
+                                        connected = True
+                                        break
+                            # If no LAN game matches, try connecting to an Online game
+                            if not connected:
+                                ip = get_local_ip()  # Use local IP for testing on the same machine
                                 if connect_to_server(ip, port):
-                                    mode = "lan_client"
-                                    break
-                        else:
-                            ip = get_public_ip()
-                            if connect_to_server(ip, port):
-                                mode = "online_client"
-                            else:
-                                mode = "multiplayer_menu"
+                                    mode = "online_client"
+                                else:
+                                    mode = "multiplayer_menu"
+                        except ValueError:
+                            message = "Invalid port number"
+                            mode = "multiplayer_menu"
+                    else:
+                        message = "Please enter a port number"
+                        mode = "multiplayer_menu"
                 elif event.key == pygame.K_BACKSPACE:
                     port_input = port_input[:-1]
                 elif event.key == pygame.K_b:
@@ -414,7 +429,7 @@ while running:
         back_text = font.render("Press B or Enter to go back", True, (255, 255, 255))
         screen.blit(back_text, (100, 400))
     elif mode == "join_prompt":
-        prompt = font.render("Enter port to join (e.g., 54321):", True, (255, 255, 255))
+        prompt = font.render("Enter port to join (e.g., 5001):", True, (255, 255, 255))
         port_text = font.render(port_input, True, (255, 255, 255))
         back_text = font.render("Press B to go back", True, (255, 255, 255))
         screen.blit(prompt, (100, 200))
