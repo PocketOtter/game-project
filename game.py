@@ -5,6 +5,9 @@ import pygame
 import requests
 import random
 import time
+import os
+import sys
+import subprocess
 
 # Game version
 VERSION = "1.1.0"
@@ -27,8 +30,9 @@ lan_games = []  # List of discovered LAN games (IP, port)
 in_game_menu = False  # For in-game menu
 selected_option = 0  # For menu navigation
 message = "Checking for updates..."  # Initial message for update check
+selected_lan_game = 0  # For selecting a LAN game to join
 
-# Function to check for updates
+# Function to check for updates and automatically apply them
 def check_for_update():
     global message
     try:
@@ -37,19 +41,49 @@ def check_for_update():
         response.raise_for_status()  # Raise an error for bad responses
         lines = response.text.strip().split("\n")
         latest_version = lines[0].strip()
-        download_url = lines[1].strip() if len(lines) > 1 else "Unknown URL"
+        download_url = lines[1].strip()
 
         # Compare versions (simple string comparison for now)
         if latest_version > VERSION:
-            message = f"Update available! New version: {latest_version}\nDownload at: {download_url}"
-            return False  # Update available
+            message = f"Update available! New version: {latest_version}\nDownloading update..."
+            if download_update(download_url):
+                message = "Update downloaded! Please restart the game to apply the update."
+                return False  # Update applied, wait for restart
+            else:
+                message = f"Update failed! New version: {latest_version}\nDownload manually at: {download_url}"
+                return False  # Update failed, notify user
         else:
             message = ""  # No update needed
-            return True  # No update
+            return True  # Proceed to main menu
     except Exception as e:
         print(f"Failed to check for updates: {e}")
         message = "Could not check for updates. Starting game..."
         return True  # Proceed anyway if the check fails
+
+# Function to download and apply the update
+def download_update(download_url):
+    try:
+        # Download the new executable
+        response = requests.get(download_url, stream=True)
+        response.raise_for_status()
+        # Save as a temporary file
+        with open("game_new.exe", "wb") as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+        # On macOS, we can replace the current executable directly
+        # On Windows, we can't replace a running .exe, so the user must restart
+        if sys.platform != "win32":
+            # Replace the current executable (works on macOS/Linux)
+            current_executable = sys.argv[0]
+            os.rename("game_new.exe", current_executable)
+            # Restart the game
+            subprocess.run([current_executable])
+            sys.exit(0)
+        return True  # On Windows, return True but require manual restart
+    except Exception as e:
+        print(f"Failed to download update: {e}")
+        return False
 
 # Networking functions
 def start_server(is_lan=True):
@@ -230,7 +264,8 @@ main_menu_options = [
 multiplayer_menu_options = [
     "Host LAN (H)",
     "Host Online (O)",
-    "Join Game (J)",
+    "Join LAN Game (J)",
+    "Join Online Game (O)",
     "Back (B)"
 ]
 
@@ -241,7 +276,7 @@ while running:
         elif event.type == pygame.KEYDOWN:
             if mode == "update_check":
                 if event.key == pygame.K_RETURN or event.key == pygame.K_ESCAPE:
-                    mode = "main_menu"  # Always proceed to main menu on Enter/Escape
+                    mode = "main_menu"  # Proceed to main menu on Enter/Escape
             elif mode in ["single", "lan_host", "online_host"] and not in_game_menu:
                 if event.key == pygame.K_ESCAPE:
                     in_game_menu = True
@@ -291,20 +326,39 @@ while running:
                     selected_option = 3
                     running = False
             elif mode == "multiplayer_menu":
-                if event.key == pygame.K_h:  # Host LAN
+                # Navigate the menu options
+                if event.key == pygame.K_UP:
+                    selected_option = (selected_option - 1) % len(multiplayer_menu_options)
+                elif event.key == pygame.K_DOWN:
+                    selected_option = (selected_option + 1) % len(multiplayer_menu_options)
+                # Navigate LAN games if "Join LAN Game" is selected
+                elif event.key == pygame.K_LEFT and selected_option == 2 and lan_games:
+                    selected_lan_game = (selected_lan_game - 1) % len(lan_games)
+                elif event.key == pygame.K_RIGHT and selected_option == 2 and lan_games:
+                    selected_lan_game = (selected_lan_game + 1) % len(lan_games)
+                elif event.key == pygame.K_h:  # Host LAN
                     selected_option = 0
                     mode = "lan_host"
                     threading.Thread(target=server_thread, args=(True,), daemon=True).start()
-                elif event.key == pygame.K_o:  # Host Online
+                elif event.key == pygame.K_o and selected_option == 1:  # Host Online
                     selected_option = 1
                     mode = "online_host"
                     threading.Thread(target=server_thread, args=(False,), daemon=True).start()
-                elif event.key == pygame.K_j:  # Join Game
-                    selected_option = 2
+                elif event.key == pygame.K_j and selected_option == 2:  # Join LAN Game
+                    if lan_games:
+                        ip, port = lan_games[selected_lan_game]
+                        if connect_to_server(ip, port):
+                            mode = "lan_client"
+                        else:
+                            mode = "multiplayer_menu"
+                    else:
+                        message = "No LAN games available"
+                elif event.key == pygame.K_o and selected_option == 3:  # Join Online Game
+                    selected_option = 3
                     mode = "join_prompt"
                     port_input = ""
                 elif event.key == pygame.K_b:  # Back
-                    selected_option = 3
+                    selected_option = 4
                     mode = "main_menu"
                     selected_option = 0
             elif mode == "controls_menu":
@@ -316,21 +370,12 @@ while running:
                     if port_input:
                         try:
                             port = int(port_input)
-                            # First, try to connect to a LAN game
-                            connected = False
-                            for ip, lan_port in lan_games:
-                                if lan_port == port:
-                                    if connect_to_server(ip, port):
-                                        mode = "lan_client"
-                                        connected = True
-                                        break
-                            # If no LAN game matches, try connecting to an Online game
-                            if not connected:
-                                ip = get_local_ip()  # Use local IP for testing on the same machine
-                                if connect_to_server(ip, port):
-                                    mode = "online_client"
-                                else:
-                                    mode = "multiplayer_menu"
+                            # Try connecting to an Online game
+                            ip = get_local_ip()  # Use local IP for testing on the same machine
+                            if connect_to_server(ip, port):
+                                mode = "online_client"
+                            else:
+                                mode = "multiplayer_menu"
                         except ValueError:
                             message = "Invalid port number"
                             mode = "multiplayer_menu"
@@ -368,7 +413,7 @@ while running:
         msg_text = font.render(message, True, (255, 255, 255))
         msg_rect = msg_text.get_rect(center=(screen.get_width() // 2, screen.get_height() // 2))
         screen.blit(msg_text, msg_rect)
-        if "Update available" in message:
+        if "Update available" in message or "Update downloaded" in message or "Update failed" in message:
             prompt_text = font.render("Press Enter or Escape to continue", True, (255, 255, 255))
             prompt_rect = prompt_text.get_rect(center=(screen.get_width() // 2, screen.get_height() // 2 + 40))
             screen.blit(prompt_text, prompt_rect)
@@ -385,6 +430,7 @@ while running:
             if i == selected_option:
                 draw_cursor(210, y_pos)
     elif mode == "multiplayer_menu":
+        # Display the main menu options
         for i, text in enumerate(multiplayer_menu_options):
             color = (255, 255, 255)
             render = font.render(text, True, color)
@@ -392,13 +438,18 @@ while running:
             screen.blit(render, (250, y_pos))
             if i == selected_option:
                 draw_cursor(210, y_pos)
-        if lan_games:
+        # Display discovered LAN games under "Join LAN Game"
+        if selected_option == 2 and lan_games:
             y_pos = 400
-            render = font.render("Discovered LAN Games:", True, (255, 255, 255))
+            render = font.render("Select a LAN Game (Left/Right to navigate, J to join):", True, (255, 255, 255))
             screen.blit(render, (100, y_pos))
             for i, (ip, port) in enumerate(lan_games):
-                render = font.render(f"Port: {port}", True, (255, 255, 255))
+                color = (255, 255, 0) if i == selected_lan_game else (255, 255, 255)
+                render = font.render(f"Game {i + 1}: {ip}:{port}", True, color)
                 screen.blit(render, (100, y_pos + (i + 1) * 30))
+        elif selected_option == 2 and not lan_games:
+            render = font.render("No LAN games found", True, (255, 255, 255))
+            screen.blit(render, (100, 400))
     elif mode == "controls_menu":
         controls = [
             "Controls:",
@@ -411,9 +462,11 @@ while running:
             "Q - Quit",
             "Multiplayer Menu:",
             "H - Host LAN",
-            "O - Host Online",
-            "J - Join Game",
+            "O - Host Online (Menu Option 1)",
+            "J - Join LAN Game (Menu Option 2)",
+            "O - Join Online Game (Menu Option 3)",
             "B - Back",
+            "Left/Right - Navigate LAN Games",
             "In-Game Menu:",
             "E - Exit To Main Menu",
             "O - Open To LAN",
@@ -447,7 +500,7 @@ while running:
 
     # Display the message in the top-right corner during gameplay
     if mode not in ["update_check", "main_menu", "multiplayer_menu", "controls_menu", "join_prompt"]:
-        if message and "Update available" not in message:  # Show port message during gameplay
+        if message and "Update available" not in message and "Update downloaded" not in message and "Update failed" not in message:
             msg_text = font.render(message, True, (255, 255, 255))
             msg_rect = msg_text.get_rect(topright=(screen.get_width() - 10, 10))
             screen.blit(msg_text, msg_rect)
