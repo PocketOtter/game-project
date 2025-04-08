@@ -10,10 +10,10 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.11'
 
@@ -27,7 +27,7 @@ jobs:
         pyinstaller --onefile --windowed game.py
 
     - name: Upload artifact
-      uses: actions/upload-artifact@0b7f8abb1508181956e8e162db84b466c27e18aa
+      uses: actions/upload-artifact@v4
       with:
         name: game-windows
         path: dist/game.exe
