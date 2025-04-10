@@ -46,8 +46,12 @@ def check_for_update():
         # Compare versions (simple string comparison for now)
         if latest_version > VERSION:
             message = f"Update available! New version: {latest_version}\nDownloading update..."
+            print(f"Downloading update from {download_url}")
             if download_update(download_url):
-                message = "Update downloaded! Please restart the game to apply the update."
+                if sys.platform != "win32":
+                    message = "Update applied! Restarting game..."
+                else:
+                    message = "Update downloaded! Please close the game and replace 'game.exe' with 'game_new.exe', then restart."
                 return False  # Update applied, wait for restart
             else:
                 message = f"Update failed! New version: {latest_version}\nDownload manually at: {download_url}"
@@ -71,13 +75,14 @@ def download_update(download_url):
             for chunk in response.iter_content(chunk_size=8192):
                 if chunk:
                     f.write(chunk)
-        # On macOS, we can replace the current executable directly
-        # On Windows, we can't replace a running .exe, so the user must restart
+        print("Update downloaded successfully as 'game_new.exe'")
+        # On macOS/Linux, we can replace the current executable and restart
         if sys.platform != "win32":
-            # Replace the current executable (works on macOS/Linux)
             current_executable = sys.argv[0]
+            print(f"Replacing {current_executable} with game_new.exe")
             os.rename("game_new.exe", current_executable)
             # Restart the game
+            print("Restarting game...")
             subprocess.run([current_executable])
             sys.exit(0)
         return True  # On Windows, return True but require manual restart
@@ -175,8 +180,10 @@ def broadcast_lan_game(ip, port):
     while server_running:
         try:
             broadcast_socket.sendto(message, ("255.255.255.255", 55555))
+            print(f"Broadcasting LAN game: {ip}:{port}")
             time.sleep(1)  # Broadcast every second
-        except:
+        except Exception as e:
+            print(f"Broadcast error: {e}")
             break
     broadcast_socket.close()
 
@@ -184,8 +191,12 @@ def discover_lan_games():
     global lan_games
     discovery_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     discovery_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    discovery_socket.bind(("0.0.0.0", 55555))
-    discovery_socket.settimeout(0.1)  # Non-blocking
+    try:
+        discovery_socket.bind(("0.0.0.0", 55555))
+    except Exception as e:
+        print(f"Failed to bind discovery socket: {e}")
+        return
+    discovery_socket.settimeout(1.0)  # Increased timeout to 1 second
 
     while True:
         try:
@@ -195,7 +206,11 @@ def discover_lan_games():
                 ip, port = game_info[1], int(game_info[2])
                 if (ip, port) not in lan_games:
                     lan_games.append((ip, port))
+                    print(f"Discovered LAN game: {ip}:{port}")
         except socket.timeout:
+            continue  # Keep listening
+        except Exception as e:
+            print(f"Discovery error: {e}")
             break
     discovery_socket.close()
 
@@ -500,7 +515,7 @@ while running:
 
     # Display the message in the top-right corner during gameplay
     if mode not in ["update_check", "main_menu", "multiplayer_menu", "controls_menu", "join_prompt"]:
-        if message and "Update available" not in message and "Update downloaded" not in message and "Update failed" not in message:
+        if message and "Update available" not in message and "Update downloaded" not in message and "Update failed" in message:
             msg_text = font.render(message, True, (255, 255, 255))
             msg_rect = msg_text.get_rect(topright=(screen.get_width() - 10, 10))
             screen.blit(msg_text, msg_rect)
