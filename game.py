@@ -10,7 +10,7 @@ import sys
 import subprocess
 
 # Game version
-VERSION = "1.2.0"
+VERSION = "1.1.0"
 
 # Initialize Pygame
 pygame.init()
