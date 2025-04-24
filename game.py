@@ -10,7 +10,7 @@ import sys
 import subprocess
 
 # Game version
-VERSION = "1.2.0"
+VERSION = "1.1.0"
 
 # Initialize Pygame
 pygame.init()
@@ -46,18 +46,21 @@ def check_for_update():
         # Compare versions (simple string comparison for now)
         if latest_version > VERSION:
             message = f"Update available! New version: {latest_version}\nDownloading update..."
+            print(f"Checking update: Current version {VERSION}, latest version {latest_version}")
             print(f"Downloading update from {download_url}")
             if download_update(download_url):
                 if sys.platform != "win32":
                     message = "Update applied! Restarting game..."
                 else:
-                    message = "Update downloaded! Please close the game and replace 'game.exe' with 'game_new.exe', then restart."
+                    message = "Update downloaded! Please close the game, replace 'game.exe' with 'game_new.exe', and restart."
                 return False  # Update applied, wait for restart
             else:
                 message = f"Update failed! New version: {latest_version}\nDownload manually at: {download_url}"
+                print(f"Update failed for version {latest_version}")
                 return False  # Update failed, notify user
         else:
             message = ""  # No update needed
+            print(f"No update needed: Current version {VERSION} is up to date")
             return True  # Proceed to main menu
     except Exception as e:
         print(f"Failed to check for updates: {e}")
@@ -80,7 +83,7 @@ def download_update(download_url):
         if sys.platform != "win32":
             current_executable = sys.argv[0]
             print(f"Replacing {current_executable} with game_new.exe")
-            os.rename("game_new.exe", current_executable)
+            os.replace("game_new.exe", current_executable)
             # Restart the game
             print("Restarting game...")
             subprocess.run([current_executable])
@@ -179,7 +182,9 @@ def broadcast_lan_game(ip, port):
     
     while server_running:
         try:
+            # Broadcast to both 255.255.255.255 and 127.0.0.1 for same-machine testing
             broadcast_socket.sendto(message, ("255.255.255.255", 55555))
+            broadcast_socket.sendto(message, ("127.0.0.1", 55555))
             print(f"Broadcasting LAN game: {ip}:{port}")
             time.sleep(1)  # Broadcast every second
         except Exception as e:
@@ -193,10 +198,11 @@ def discover_lan_games():
     discovery_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
         discovery_socket.bind(("0.0.0.0", 55555))
+        print("LAN discovery started, listening on port 55555")
     except Exception as e:
-        print(f"Failed to bind discovery socket: {e}")
+        print(f"Failed to bind discovery socket on port 55555: {e}")
         return
-    discovery_socket.settimeout(1.0)  # Increased timeout to 1 second
+    discovery_socket.settimeout(1.0)  # 1-second timeout
 
     while True:
         try:
@@ -206,7 +212,7 @@ def discover_lan_games():
                 ip, port = game_info[1], int(game_info[2])
                 if (ip, port) not in lan_games:
                     lan_games.append((ip, port))
-                    print(f"Discovered LAN game: {ip}:{port}")
+                    print(f"Discovered LAN game: {ip}:{port} from {addr}")
         except socket.timeout:
             continue  # Keep listening
         except Exception as e:
@@ -225,7 +231,7 @@ def connect_to_server(ip, port):
         message = f"Connected to port {port}"
         return True
     except Exception as e:
-        print(f"Connection failed: {e}")
+        print(f"Connection failed to {ip}:{port}: {e}")
         message = f"Failed to connect to {ip}:{port}"
         client_socket = None
         return False
@@ -238,10 +244,17 @@ def receive_data():
             if data:
                 players = json.loads(data)
                 if local_player_id is None:
-                    local_player_id = min(players.keys())
+                    # Ensure we have a valid player ID
+                    player_ids = list(players.keys())
+                    if player_ids:  # Check if there are any player IDs
+                        local_player_id = min(player_ids)
+                        print(f"Assigned local_player_id: {local_player_id}")
+                    else:
+                        print("No player IDs received from server yet")
         except:
             if client_socket:
                 client_socket.close()
+                client_socket = None
             break
 
 # Function to draw the custom cursor
@@ -362,12 +375,14 @@ while running:
                 elif event.key == pygame.K_j and selected_option == 2:  # Join LAN Game
                     if lan_games:
                         ip, port = lan_games[selected_lan_game]
+                        print(f"Attempting to join LAN game at {ip}:{port}")
                         if connect_to_server(ip, port):
                             mode = "lan_client"
                         else:
                             mode = "multiplayer_menu"
                     else:
                         message = "No LAN games available"
+                        print("No LAN games available in the lan_games list")
                 elif event.key == pygame.K_o and selected_option == 3:  # Join Online Game
                     selected_option = 3
                     mode = "join_prompt"
@@ -387,6 +402,7 @@ while running:
                             port = int(port_input)
                             # Try connecting to an Online game
                             ip = get_local_ip()  # Use local IP for testing on the same machine
+                            print(f"Attempting to join online game at {ip}:{port}")
                             if connect_to_server(ip, port):
                                 mode = "online_client"
                             else:
@@ -417,9 +433,12 @@ while running:
         if keys[pygame.K_DOWN]:
             players[0]["y"] += 5
 
-    # Send data if client
-    if mode in ["lan_client", "online_client"] and client_socket:
-        client_socket.send(json.dumps(players[local_player_id]).encode())
+    # Send data if client, but only if local_player_id is set
+    if mode in ["lan_client", "online_client"] and client_socket and local_player_id is not None:
+        try:
+            client_socket.send(json.dumps(players[local_player_id]).encode())
+        except KeyError as e:
+            print(f"KeyError while sending data: {e}. local_player_id: {local_player_id}, players: {players}")
 
     # Render
     screen.fill((0, 0, 0))
@@ -515,7 +534,7 @@ while running:
 
     # Display the message in the top-right corner during gameplay
     if mode not in ["update_check", "main_menu", "multiplayer_menu", "controls_menu", "join_prompt"]:
-        if message and "Update available" not in message and "Update downloaded" not in message and "Update failed" in message:
+        if message and "Update available" not in message and "Update downloaded" not in message and "Update failed" not in message:
             msg_text = font.render(message, True, (255, 255, 255))
             msg_rect = msg_text.get_rect(topright=(screen.get_width() - 10, 10))
             screen.blit(msg_text, msg_rect)
